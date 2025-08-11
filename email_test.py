@@ -9,56 +9,53 @@ import os
 load_dotenv()
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
+IMAP_SERVER = os.getenv("IMAP_SERVER")
 
-if EMAIL_USER is None or EMAIL_PASS is None:
-	raise ValueError("EMAIL_USER and EMAIL_PASS environment variables must be set.")
 
-# Connect to IMAP server
-mail = imaplib.IMAP4_SSL("imap.gmail.com")
-mail.login(EMAIL_USER, EMAIL_PASS)
-mail.select("INBOX", readonly=True)
+def list_unread_emails(folder="INBOX"):
+    """List unread emails in the given folder."""
+    
+    if EMAIL_USER is None or EMAIL_PASS is None or IMAP_SERVER is None:
+        raise ValueError("EMAIL_USER and EMAIL_PASS environment variables must be set.")
+    
+    mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+    mail.login(EMAIL_USER, EMAIL_PASS)
 
-status, messages = mail.search(None, 'UNSEEN')
+    try:
+        # Select folder in readonly mode
+        status, _ = mail.select(folder, readonly=True)
+        if status != "OK":
+            print(f" Could not open folder: {folder}")
+            return
 
-if status == "OK":
-	email_ids = messages[0].split()
-	print(f"Found {len(email_ids)} matching emails.")
+        status, messages = mail.search(None, "UNSEEN")
+        if status != "OK":
+            print("Error searching inbox.")
+            return
 
-	log_lines = []
-	for num in email_ids:
-		# Fetch email by ID
-		res, msg_data = mail.fetch(num, "(RFC822)")
-		if res != "OK":
-			continue
+        email_ids = messages[0].split()
+        print(f" Folder: {folder} — Found {len(email_ids)} unread emails.\n")
+        
+        log_lines = []
+        
+        for num in email_ids:
+            res, msg_data = mail.fetch(num, "(RFC822)")
+            if res != "OK" or not msg_data or not isinstance(msg_data[0], tuple) or not isinstance(msg_data[0][1], (bytes, bytearray)):
+                continue
 
-		# Parse the raw email
-		if msg_data and isinstance(msg_data[0], tuple) and isinstance(msg_data[0][1], (bytes, bytearray)):
-			msg = email.message_from_bytes(msg_data[0][1])
-		else:
-			print(f"Failed to parse email with ID {num}: unexpected fetch result.")
-			continue
-		
-		# Decode subject
-		subject, encoding = decode_header(msg["Subject"])[0]
-		if isinstance(subject, bytes):
-			subject = subject.decode(encoding if encoding else "utf-8")
+            msg = email.message_from_bytes(msg_data[0][1])
+            subject, encoding = decode_header(msg["Subject"])[0]
+            if isinstance(subject, bytes):
+                subject = subject.decode(encoding or "utf-8", errors="ignore")
 
-		# From field
-		from_ = msg.get("From")
+            from_ = msg.get("From")
+            date_ = msg.get("Date")
 
-		# Date field
-		date_ = msg.get("Date")
+            print(f"From: {from_}\nSubject: {subject}\nDate: {date_}\n{'-'*50}\n")
 
-		print(f"From: {from_}\nSubject: {subject}\nDate: {date_}\n{'-'*50}")
-
-		# Save to log
-		log_lines.append(f"From: {from_}\nSubject: {subject}\nDate: {date_}\n{'-'*50}")
-
-	with open("email_log.txt", "w", encoding="utf-8") as f:
-		f.writelines(log_lines)
-
-else: 
-	print("Error searching inbox.")
-	
-mail.close()
-mail.logout()
+    finally:
+        mail.close()
+        mail.logout()
+        
+if __name__=="__main__":
+    list_unread_emails()
